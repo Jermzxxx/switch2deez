@@ -158,8 +158,57 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         ticks_to_destroy = (std::max)(ticks_to_destroy, min_age);
         num_iterations = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
     };
-    const auto Cleanup = [this, &num_iterations, &high_priority_mode, &aggressive_mode,
-                          &evict_old_costly, out_of_memory](ImageId image_id) {
+    // Images that must be downloaded first are evicted in batches: record their copies, wait for
+    // the GPU once, then swizzle in modification order (one wait per image stalled the GPU thread
+    // up to 40 times per pass). Their memory counts as freed as soon as they are queued.
+    constexpr size_t MaxBatchBytes = 64_MiB;
+    using Map = decltype(runtime.DownloadStagingBuffer(size_t{}));
+    using Copies = decltype(FullDownloadCopies(std::declval<const ImageInfo&>()));
+    struct PendingEviction {
+        ImageId image_id;
+        Map map;
+        Copies copies;
+        bool immediate;
+    };
+    boost::container::small_vector<PendingEviction, 16> pending;
+    size_t pending_bytes = 0;
+    u64 pending_freed = 0;
+    const auto used_memory = [&] {
+        return total_used_memory - (std::min)(total_used_memory, pending_freed);
+    };
+    const auto Evict = [this](ImageId image_id, bool immediate) {
+        auto& image = slot_images[image_id];
+        if (True(image.flags & ImageFlagBits::Tracked)) {
+            UntrackImage(image, image_id);
+        }
+        ++(True(image.flags & ImageFlagBits::CostlyLoad) ? gc_costly_deletes : gc_deletes);
+        UnregisterImage(image_id);
+        DeleteImage(image_id, immediate);
+    };
+    const auto FlushPending = [&] {
+        if (pending.empty()) {
+            return;
+        }
+        runtime.Finish();
+        std::ranges::sort(pending, [this](const PendingEviction& lhs, const PendingEviction& rhs) {
+            return slot_images[lhs.image_id].modification_tick <
+                   slot_images[rhs.image_id].modification_tick;
+        });
+        for (PendingEviction& entry : pending) {
+            auto& image = slot_images[entry.image_id];
+            SwizzleImage(*gpu_memory, image.gpu_addr, image.info, entry.copies,
+                         entry.map.mapped_span, swizzle_data_buffer);
+            ++gc_download_deletes;
+            ClearStaleImage(image);
+        }
+        for (const PendingEviction& entry : pending) {
+            Evict(entry.image_id, entry.immediate);
+        }
+        pending.clear();
+        pending_bytes = 0;
+        pending_freed = 0;
+    };
+    const auto Cleanup = [&, out_of_memory](ImageId image_id) {
         if (num_iterations == 0) {
             return true;
         }
@@ -173,30 +222,39 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
             (!high_priority_mode && must_download)) {
             return false;
         }
+        const bool immediate = image.scale_tick > frame_tick + 5;
         if (must_download) {
+            if (!pending.empty() && pending_bytes + image.unswizzled_size_bytes > MaxBatchBytes) {
+                FlushPending();
+            }
             auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
-            const auto copies = FullDownloadCopies(image.info);
+            auto copies = FullDownloadCopies(image.info);
             image.DownloadMemory(map, copies);
-            runtime.Finish();
-            SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, map.mapped_span, swizzle_data_buffer);
-            ++gc_download_deletes;
-            ClearStaleImage(image);
+            pending_bytes += image.unswizzled_size_bytes;
+            pending_freed += (image.HasScaled() ? GetScaledImageSizeBytes(image) : 0) +
+                             ImageMemoryBytes(image);
+            pending.push_back(PendingEviction{image_id, map, std::move(copies), immediate});
         } else {
+            // Keep the original order where a queued download overlaps: its swizzle and stale
+            // clear go before this image's stale mark.
+            const bool overlaps = std::ranges::any_of(pending, [&](const PendingEviction& entry) {
+                const auto& other = slot_images[entry.image_id];
+                return image.cpu_addr < other.cpu_addr + other.guest_size_bytes &&
+                       other.cpu_addr < image.cpu_addr + image.guest_size_bytes;
+            });
+            if (overlaps) {
+                FlushPending();
+            }
             MarkStale(image); // before UntrackImage (see MarkStale)
+            Evict(image_id, immediate);
         }
-        if (True(image.flags & ImageFlagBits::Tracked)) {
-            UntrackImage(image, image_id);
-        }
-        ++(True(image.flags & ImageFlagBits::CostlyLoad) ? gc_costly_deletes : gc_deletes);
-        UnregisterImage(image_id);
-        DeleteImage(image_id, image.scale_tick > frame_tick + 5);
         if (out_of_memory) {
             return false;
         }
-        if (aggressive_mode && total_used_memory < critical_memory) {
+        if (aggressive_mode && used_memory() < critical_memory) {
             num_iterations >>= 2;
             aggressive_mode = false;
-        } else if (high_priority_mode && total_used_memory < expected_memory) {
+        } else if (high_priority_mode && used_memory() < expected_memory) {
             num_iterations >>= 1;
             high_priority_mode = false;
         }
@@ -261,12 +319,15 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
     if (high_priority_mode && old_age != 0 && frame_tick > old_age) {
         evict_old_costly = true;
         lru_cache.ForEachItemBelow(frame_tick - old_age, Cleanup);
+        FlushPending();
         evict_old_costly = false;
     }
     Collect();
+    FlushPending();
     if (out_of_memory || total_used_memory >= critical_memory) {
         Configure(true);
         Collect();
+        FlushPending();
     }
 }
 
