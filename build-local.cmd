@@ -2,6 +2,8 @@
 rem Local Windows build matching the CI's clang-cl job (.github/workflows/build-check.yml).
 rem Usage: build-local.cmd [configure|build|test|all]   (default: all)
 rem Output: build\bin\lichii.exe
+rem RELEASE_TAG=build-N and RELEASE_PLATFORM=windows-x86_64 make a numbered release build that the
+rem built-in updater can compare (release-local.ps1 sets them); leave them unset for dev builds.
 
 setlocal
 set "ROOT=%~dp0"
@@ -35,7 +37,9 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DYUZU_BUILD_PRESET=v3 ^
   -DENABLE_WERROR=ON -DBUILD_TESTING=ON -DYUZU_TESTS=ON -DENABLE_QT=ON -DYUZU_CMD=ON ^
   -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_USE_BUNDLED_QT=OFF ^
-  -DYUZU_USE_BUNDLED_SDL3=ON -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF || exit /b 1
+  -DYUZU_USE_BUNDLED_SDL3=ON -DENABLE_UPDATE_CHECKER=ON -DUSE_DISCORD_PRESENCE=OFF ^
+  -DLICHII_UPDATE_REPO=Jermzxxx/switch2deez -DLICHII_APP_NAME=switch2deez ^
+  "-DLICHII_BUILD_TAG=%RELEASE_TAG%" "-DLICHII_BUILD_PLATFORM=%RELEASE_PLATFORM%" || exit /b 1
 if "%STEP%"=="configure" exit /b 0
 
 :build

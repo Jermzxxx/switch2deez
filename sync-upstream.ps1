@@ -33,6 +33,7 @@ if ($LASTEXITCODE -ne 0) { Log "FAILED: could not fetch upstream."; exit 1 }
 $behind = git rev-list --count "$myBranch..upstream/$upstreamBranch"
 if ([int]$behind -eq 0) { Log "Up to date."; exit 0 }
 
+$before = git rev-parse HEAD
 git merge --no-edit "upstream/$upstreamBranch" -m "Merge upstream/$upstreamBranch ($(Get-Date -Format 'yyyy-MM-dd'))"
 if ($LASTEXITCODE -ne 0) {
     $conflicts = (git diff --name-only --diff-filter=U) -join ', '
@@ -41,6 +42,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 2
 }
 Log "Merged $behind new upstream commit(s)."
+
+# Build and test the merge before it goes anywhere (skipped until build-local.cmd configure has run).
+if (Test-Path (Join-Path $repo 'build\CMakeCache.txt')) {
+    $buildLog = Join-Path $repo '.git\sync-build.log'
+    foreach ($step in 'build', 'test') {
+        cmd /c "`"$repo\build-local.cmd`" $step" *> $buildLog
+        if ($LASTEXITCODE -ne 0) {
+            git reset --hard $before --quiet
+            Log "FAILED: the merge did not pass '$step', so it was undone and nothing was pushed. See $buildLog; retry by hand with: git merge upstream/$upstreamBranch"
+            exit 3
+        }
+    }
+    Log "Build and tests passed."
+}
 
 # Push to your own GitHub fork if one is configured as 'origin'.
 if ((git remote) -contains 'origin') {

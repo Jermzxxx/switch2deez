@@ -6,92 +6,74 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-<p align="center">
-  <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
-</p>
+# switch2deez
 
-# Lichii
+switch2deez is a personal fork of [Lichii](https://github.com/zortos293/Lichii), the open-source Nintendo Switch and Switch 2 emulator. It follows Lichii closely: Lichii's changes are merged in every day, and this fork adds a small set of performance fixes and build changes of its own.
 
-Lichii is an experimental, open-source Nintendo Switch and Switch 2 emulator written in C++. It builds on Eglantine, Eden, yuzu and Sudachi, preserving their contributions while developing this fork's game compatibility and renderer fixes.
+This is an unofficial build. It is not made or supported by the Lichii project or the projects Lichii builds on (Eglantine, Eden, yuzu and Sudachi), and it is not affiliated with Nintendo. Report problems with this build here, not to Lichii.
 
-This is an independent fork, not an official release of those upstream projects. Lichii is not affiliated with Nintendo.
+## Downloads and updates
 
-Visit the [official Lichii website](https://lichii.zortos.me) to find games and compare community compatibility reports.
+Download builds only from this repository's [releases page](https://github.com/Jermzxxx/switch2deez/releases).
 
-## Downloads and setup
+On Windows, extract the whole archive to a folder of its own and run **lichii.exe**. The program keeps Lichii's file name and data folder.
 
-Download Lichii only from this repository's [releases page](https://github.com/zortos293/Lichii/releases). Lichii has no other download site: archives offered elsewhere, such as lichii.org, are not built by this project, and one has been reported to install malware ([#545](https://github.com/zortos293/Lichii/issues/545)).
+Release builds check this repository for a newer release when they start and offer to install it. Turn this off in the settings with **Check for updates**. After an update, **Help > Restore Previous Version** goes back to the build you updated from.
 
-On Windows, extract the entire build archive and run **lichii.exe**. Only use games and system files you have legally obtained. Games, keys and firmware are not included.
+Only use games and system files you have legally obtained. Games, keys and firmware are not included.
 
-### Existing saves and settings
+### Saves and settings
 
-The rebrand intentionally retains the existing Eden/Eglantine data directories and configuration keys. It does not move or delete saves, settings or shader caches. Back up your saves before testing experimental builds.
+switch2deez uses the same data folder as Lichii and Eden (`%APPDATA%\eden` on Windows), so your saves, settings and shader caches are shared with them. Back up your saves before trying a new build.
 
-## Compatibility and issue reports
+## What is different from Lichii
 
-Compatibility and performance vary by game, hardware and driver. Rendering errors, stutters and crashes remain possible. Passing automated tests does not establish that a game renders correctly, and this project makes no universal frame-rate guarantee.
+- **Fewer duplicate shader pipelines:** tessellation state is left out of pipelines that have no tessellation stages, so the same shaders aren't built twice.
+- **Shorter GPU waits on Windows:** waits for GPU submissions sleep for one timer tick instead of a full millisecond or more.
+- **Texture cache cleanup in batches:** evicting textures that must be copied back to memory waits for the GPU once per batch instead of once per texture.
+- **Less thread wake-up overhead:** the GPU command queues signal the other thread only when it is actually waiting.
+- **A warning when the GPU thread split is off:** the log says when GPU or DMA accuracy settings stop the faster split GPU thread from starting.
+- **Optimised Windows builds:** release compiler flags for clang-cl, and code built for x86-64-v3 CPUs.
 
-Browse [community compatibility reports](https://lichii.zortos.me/reports) for results with each player's build and setup.
+x86-64-v3 builds need a CPU with AVX2: Intel Haswell (4th generation Core, 2013) or newer, or AMD Zen or newer.
 
-Desktop reporting requires a build containing [PR #303](https://github.com/zortos293/Lichii/pull/303) and is not available in build 88. In builds that include it, play and stop a Switch 2 game, then right-click that game and choose **Submit compatibility report**. Only the latest session in the current Lichii process is eligible.
+Everything else, including game compatibility, comes from Lichii. See [Lichii's compatibility reports](https://lichii.zortos.me/reports) for how games run.
 
-Confirm the matching website catalog entry and review the editable machine, game, setup, and enabled add-on details prefilled where available. Check the public preview and give explicit consent before submitting. Nothing uploads automatically, and the native v1 reporter does not read or upload logs or files.
+## Reporting problems
 
-When [reporting an issue](https://github.com/zortos293/Eglantine/issues), include:
+[Open an issue](https://github.com/Jermzxxx/switch2deez/issues) with:
 
-- The exact build, game version, CPU, GPU and driver version.
-- Relevant settings and steps to reproduce the problem.
-- A screenshot and the log from the affected session, after checking it for personal information.
+- The build number (from the title bar or the first line of the log), the game and its version, your CPU, GPU and driver version.
+- Your relevant settings and the steps to reproduce the problem.
+- The log from the affected session (`%APPDATA%\eden\log\eden_log.txt`), after checking it for personal information.
 
 Do not upload game files, keys, firmware or private account information.
 
-## Building and contributing
+If the problem also happens in an official Lichii release, it belongs with Lichii instead.
 
-See the [build guide](docs/Build.md), [user documentation](docs/user/README.md) and [coding guidelines](docs/Coding.md). Some inherited documentation and internal build target names still use upstream names. The GUI build target remains `yuzu`; its output is `lichii.exe` on Windows and `lichii` on other desktop platforms.
+## Building
 
-Keep changes focused and distinguish code-level checks from actual gameplay testing.
+On Windows, with Visual Studio 2022 Build Tools, LLVM 22.1.8 in `C:\LLVM22`, Qt 6.8.3 in `C:\Qt`, CMake, Ninja and the Vulkan SDK installed:
 
-## Artwork
-Art created by YOB (yobslab)
-The supplied Lichii logo, icon and library artwork are in [dist/branding](dist/branding). Windows, Linux and macOS icon resources are generated from that artwork by [Generate-LichiiIcons.ps1](tools/Generate-LichiiIcons.ps1).
-
-## Support Lichii
-
-Lichii is free and stays free. If you want to help, you can donate in crypto. Donations help pay for the AI tools and build machines used to develop this open-source project faster.
-
-**Solana (SOL)**
-```text
-JepEjfyWjGjhJvHSrqj52KtLjcbbbmUh1iGqerYBF4w
+```bat
+build-local.cmd            :: configure, build and run the tests
+build-local.cmd build      :: rebuild after changes
+run-local.cmd              :: run the build
+run-local.cmd trace        :: run it and log stutters and GPU timing
 ```
 
-**Ethereum (ETH)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+The program is built to `build\bin\lichii.exe`. For other platforms and details, see Lichii's [build guide](docs/Build.md).
 
-**Bitcoin (BTC)**
-```text
-bc1qcvxdpf4qvdhqp8ee4s355cjmxrzsphsdwpl8w4
-```
+### Keeping up with Lichii
 
-**BNB Smart Chain (BNB)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+`sync-upstream.ps1` merges Lichii's latest changes into `main`, builds them and runs the tests, and pushes only when everything passes. A merge that conflicts or fails is undone and logged in `.git\sync-upstream.log`.
 
-**Polygon**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+### Publishing a release
 
-Send each coin on its matching network. Coins sent on the wrong network can't be recovered.
-
-> [!NOTE]
-> Donations are voluntary gifts and are non-refundable. A donation does not buy any product, service, perk, early access, exclusive build, priority support or say in the project. Every release stays free and public for everyone.
+`release-local.ps1` builds the next numbered release (`build-N`) from `main`, packages `lichii-windows-x86_64.zip` and publishes it here, where installed builds find it as an update. Run it with `-DryRun` to build and package without publishing.
 
 ## Credits and license
 
-Lichii inherits the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors, including Eglantine's original developer Camille LaVey. Original copyright notices and third-party licenses are retained.
+switch2deez is built on [Lichii](https://github.com/zortos293/Lichii) and the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors. Original copyright notices and third-party licenses are kept. The Lichii logo, icon and artwork in [dist/branding](dist/branding) were created by YOB (yobslab) for Lichii.
 
-See [LICENSE.txt](LICENSE.txt) and the source files for applicable license terms.
+This program is free software under the GNU General Public License. See [LICENSE.txt](LICENSE.txt) and the source files for the applicable license terms.
