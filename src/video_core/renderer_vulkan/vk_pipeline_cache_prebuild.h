@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <cstddef>
 #include <exception>
 #include <memory>
@@ -21,6 +22,8 @@ class PipelinePrebuild {
         std::unique_ptr<EmissionBudget::Reservation> reservation;
         std::unique_ptr<Pipeline> pipeline;
         bool claimed{};
+        bool building{};
+        bool awaited{};
     };
 
 public:
@@ -51,6 +54,7 @@ public:
             {
                 std::scoped_lock lock{mutex};
                 run = !stopped && !entry->claimed;
+                entry->building = run;
             }
             std::unique_ptr<Pipeline> pipeline;
             if (run) {
@@ -66,12 +70,14 @@ public:
             build = {};
             {
                 std::scoped_lock lock{mutex};
-                if (!stopped && !entry->claimed && pipeline) {
+                entry->building = false;
+                if (!stopped && (!entry->claimed || entry->awaited) && pipeline) {
                     entry->pipeline = std::move(pipeline);
                 } else if (!entry->claimed) {
                     entries.erase(key);
                 }
             }
+            built.notify_all();
         });
         return true;
     }
@@ -90,16 +96,18 @@ public:
     }
 
     std::unique_ptr<Pipeline> Take(const Key& key) {
-        std::shared_ptr<Entry> entry;
-        {
-            std::scoped_lock lock{mutex};
-            const auto it = entries.find(key);
-            if (it == entries.end()) {
-                return nullptr;
-            }
-            entry = std::move(it->second);
-            entries.erase(it);
-            entry->claimed = true;
+        std::unique_lock lock{mutex};
+        const auto it = entries.find(key);
+        if (it == entries.end()) {
+            return nullptr;
+        }
+        const std::shared_ptr<Entry> entry = std::move(it->second);
+        entries.erase(it);
+        entry->claimed = true;
+        if (entry->building) {
+            // The build is already under way: finishing it is never slower than starting over.
+            entry->awaited = true;
+            built.wait(lock, [&] { return !entry->building || stopped; });
         }
         return std::move(entry->pipeline);
     }
@@ -109,6 +117,7 @@ public:
             std::scoped_lock lock{mutex};
             stopped = true;
         }
+        built.notify_all();
         workers.reset();
         tasks.clear();
         entries.clear();
@@ -121,6 +130,7 @@ private:
     bool started{};
     bool stopped{};
     std::mutex mutex;
+    std::condition_variable built;
     std::unordered_map<Key, std::shared_ptr<Entry>> entries;
     std::vector<Common::UniqueFunction<void>> tasks;
     std::unique_ptr<Common::ThreadWorker> workers;
