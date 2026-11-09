@@ -230,7 +230,12 @@ bool Scheduler::WaitSubmitted(u64 tick) {
         if (spins < 64) {
             std::this_thread::yield();
         } else {
+#ifdef _WIN32
+            // sleep_for rounds up to Sleep(1) (>= 1 ms) on Windows.
+            Common::Windows::SleepForOneTick();
+#else
             std::this_thread::sleep_for(std::chrono::microseconds{50});
+#endif
         }
     }
     return true;

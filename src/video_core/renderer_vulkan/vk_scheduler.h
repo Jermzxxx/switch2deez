@@ -24,6 +24,9 @@
 #include "common/logging.h"
 #include "common/polyfill_thread.h"
 #include "common/settings.h"
+#ifdef _WIN32
+#include "common/windows/timer_resolution.h"
+#endif
 #include "video_core/gpu_split.h"
 #include "video_core/renderer_vulkan/fragment_barrier_state.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
@@ -216,7 +219,12 @@ public:
             if (std::chrono::steady_clock::now() >= deadline) {
                 return false;
             }
+#ifdef _WIN32
+            // sleep_for rounds up to Sleep(1) (>= 1 ms) on Windows.
+            Common::Windows::SleepForOneTick();
+#else
             std::this_thread::sleep_for(std::chrono::microseconds{100});
+#endif
         }
         return true;
     }
