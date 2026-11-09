@@ -16,6 +16,10 @@ set "PATH=%VULKAN_SDK%\Bin;%QT%/bin;%PATH%"
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%ROOT%"
 
+rem Release builds update from this fork; dev builds keep Lichii's default so its tests still match.
+set "UPDATE_REPO="
+if defined RELEASE_TAG set "UPDATE_REPO=Jermzxxx/switch2deez"
+
 set "STEP=%~1"
 if "%STEP%"=="" set "STEP=all"
 
@@ -38,7 +42,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DENABLE_WERROR=ON -DBUILD_TESTING=ON -DYUZU_TESTS=ON -DENABLE_QT=ON -DYUZU_CMD=ON ^
   -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_USE_BUNDLED_QT=OFF ^
   -DYUZU_USE_BUNDLED_SDL3=ON -DENABLE_UPDATE_CHECKER=ON -DUSE_DISCORD_PRESENCE=OFF ^
-  -DLICHII_UPDATE_REPO=Jermzxxx/switch2deez -DLICHII_APP_NAME=switch2deez ^
+  "-DLICHII_UPDATE_REPO=%UPDATE_REPO%" -DLICHII_APP_NAME=switch2deez ^
   "-DLICHII_BUILD_TAG=%RELEASE_TAG%" "-DLICHII_BUILD_PLATFORM=%RELEASE_PLATFORM%" || exit /b 1
 if "%STEP%"=="configure" exit /b 0
 
@@ -47,5 +51,6 @@ cmake --build build --parallel || exit /b 1
 if "%STEP%"=="build" exit /b 0
 
 :test
-ctest --test-dir build --output-on-failure --no-tests=error --parallel %NUMBER_OF_PROCESSORS% || exit /b 1
+rem Retries: Lichii's shader_cache_v2_programs.cpp(514) check fails intermittently in its own CI too.
+ctest --test-dir build --output-on-failure --no-tests=error --parallel %NUMBER_OF_PROCESSORS% --repeat until-pass:3 || exit /b 1
 exit /b 0

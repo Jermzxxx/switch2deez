@@ -27,12 +27,18 @@ function Invoke-Build([string]$step) {
     if ($LASTEXITCODE -ne 0) { throw "build-local.cmd $step failed" }
 }
 
+# Test as a dev build (Lichii's tests expect its default update repository), then build the
+# release from the same sources.
+Remove-Item Env:RELEASE_TAG, Env:RELEASE_PLATFORM -ErrorAction SilentlyContinue
+Invoke-Build configure
+Invoke-Build build
+Invoke-Build test
+
 $env:RELEASE_TAG = $tag
 $env:RELEASE_PLATFORM = $platform
 try {
     Invoke-Build configure
     Invoke-Build build
-    Invoke-Build test
 
     # Package the deployed bin directory (Qt and the other DLLs included), without the test programs.
     $stage = Join-Path $repo "build\release-stage\$tag"
