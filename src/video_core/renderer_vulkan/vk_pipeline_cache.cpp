@@ -867,6 +867,15 @@ GraphicsPipeline* PipelineCache::CurrentGraphicsPipeline() {
         return nullptr;
     }
     graphics_key.state.Refresh(*maxwell3d, dynamic_features);
+    if (graphics_key.unique_hashes[2] == 0 && graphics_key.unique_hashes[3] == 0) {
+        // Only tessellation stages read these: registers left set split the same shaders
+        // into separate pipelines.
+        auto& state = graphics_key.state;
+        state.tessellation_primitive.Assign(0);
+        state.tessellation_spacing.Assign(0);
+        state.tessellation_clockwise.Assign(0);
+        state.patch_control_points_minus_one.Assign(0);
+    }
 
     if (current_pipeline) {
         GraphicsPipeline* const next{current_pipeline->Next(graphics_key)};
