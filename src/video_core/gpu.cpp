@@ -160,6 +160,7 @@ struct GPU::Impl {
         std::unique_lock lck{sync_request_mutex};
         const u64 fence = ++last_sync_fence;
         sync_requests.emplace_back(std::forward<Func>(action));
+        has_sync_requests.store(true, std::memory_order_release);
         return fence;
     }
 
@@ -181,7 +182,13 @@ struct GPU::Impl {
 
     /// Tick pending requests within the GPU.
     void TickWork() {
+        // Called on every draw: skip the lock while nothing is queued. A request queued after
+        // this check runs on the next tick, as one queued after the loop below would.
+        if (!has_sync_requests.load(std::memory_order_acquire)) {
+            return;
+        }
         std::unique_lock lck{sync_request_mutex};
+        has_sync_requests.store(false, std::memory_order_relaxed);
         while (!sync_requests.empty()) {
             auto request = std::move(sync_requests.front());
             sync_requests.pop_front();
@@ -422,6 +429,7 @@ struct GPU::Impl {
     std::condition_variable sync_cv;
 
     std::list<std::function<void()>> sync_requests;
+    std::atomic<bool> has_sync_requests{};
     std::atomic<u64> current_sync_fence{};
     std::atomic<AmpereAnchor> ampere_anchor{};
     u64 last_sync_fence{};

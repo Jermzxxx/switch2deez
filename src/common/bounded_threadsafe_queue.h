@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <memory>
 #include <new>
@@ -69,9 +70,10 @@ public:
     bool PopWaitFor(T& t, const std::chrono::duration<Rep, Period>& timeout,
                     const std::stop_token stop_token = {}) noexcept {
         std::unique_lock lock{consumer.cv_mutex};
+        const Waiting waiting{consumer.waiters};
         const bool ready = consumer.cv.wait_for(lock, stop_token, timeout, [this] {
             return consumer.index.load(std::memory_order::relaxed) !=
-                   producer.index.load(std::memory_order::acquire);
+                   producer.index.load(std::memory_order::seq_cst);
         });
         if (!ready || stop_token.stop_requested()) {
             return false;
@@ -93,6 +95,19 @@ public:
     }
 
 private:
+    // A side announces it is about to sleep; the other side takes the lock and notifies only
+    // then. Both the waiter count and the indices are sequentially consistent, so either the
+    // sleeper sees the new index or the other side sees the sleeper.
+    struct Waiting {
+        explicit Waiting(std::atomic<std::uint32_t>& count_) : count{count_} {
+            count.fetch_add(1, std::memory_order::seq_cst);
+        }
+        ~Waiting() {
+            count.fetch_sub(1, std::memory_order::relaxed);
+        }
+        std::atomic<std::uint32_t>& count;
+    };
+
     enum class PushMode {
         Try,
         Wait,
@@ -117,8 +132,9 @@ private:
         } else if constexpr (Mode == PushMode::Wait) {
             // Wait until we have free slots to write to.
             std::unique_lock lock{producer.cv_mutex};
+            const Waiting waiting{producer.waiters};
             producer.cv.wait(lock, [this, write_index] {
-                return (write_index - consumer.index.load(std::memory_order::acquire)) < Capacity;
+                return (write_index - consumer.index.load(std::memory_order::seq_cst)) < Capacity;
             });
         } else {
             static_assert(Mode < PushMode::Count, "Invalid PushMode.");
@@ -130,8 +146,10 @@ private:
         // Increment the write index.
         ++producer.index;
         // Notify the consumer that we have pushed into the queue.
-        std::scoped_lock lock{consumer.cv_mutex};
-        consumer.cv.notify_one();
+        if (consumer.waiters.load(std::memory_order::seq_cst) != 0) {
+            std::scoped_lock lock{consumer.cv_mutex};
+            consumer.cv.notify_one();
+        }
         return true;
     }
 
@@ -146,14 +164,16 @@ private:
         } else if constexpr (Mode == PopMode::Wait) {
             // Wait until the queue is not empty.
             std::unique_lock lock{consumer.cv_mutex};
+            const Waiting waiting{consumer.waiters};
             consumer.cv.wait(lock, [this, read_index] {
-                return read_index != producer.index.load(std::memory_order::acquire);
+                return read_index != producer.index.load(std::memory_order::seq_cst);
             });
         } else if constexpr (Mode == PopMode::WaitWithStopToken) {
             // Wait until the queue is not empty.
             std::unique_lock lock{consumer.cv_mutex};
+            const Waiting waiting{consumer.waiters};
             consumer.cv.wait(lock, stop_token, [this, read_index] {
-                return read_index != producer.index.load(std::memory_order::acquire);
+                return read_index != producer.index.load(std::memory_order::seq_cst);
             });
             if (stop_token.stop_requested()) {
                 return false;
@@ -171,8 +191,10 @@ private:
         // Increment the read index.
         ++consumer.index;
         // Notify the producer that we have popped off the queue.
-        std::scoped_lock lock{producer.cv_mutex};
-        producer.cv.notify_one();
+        if (producer.waiters.load(std::memory_order::seq_cst) != 0) {
+            std::scoped_lock lock{producer.cv_mutex};
+            producer.cv.notify_one();
+        }
         return true;
     }
 
@@ -184,11 +206,13 @@ private:
     std::array<Slot, Capacity> m_data;
     alignas(64) struct {
         std::atomic_size_t index{0};
+        std::atomic<std::uint32_t> waiters{0};
         std::condition_variable_any cv;
         std::mutex cv_mutex;
     } producer;
     alignas(64) struct {
         std::atomic_size_t index{0};
+        std::atomic<std::uint32_t> waiters{0};
         std::condition_variable_any cv;
         std::mutex cv_mutex;
     } consumer;
