@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <thread>
+#include <utility>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -111,6 +112,13 @@ void GpuSplit::MaybeStart(Core::System& system_) {
         Stop();
         LOG_INFO(HW_GPU, "GPU thread split: stopped, the accuracy settings need the caches on the front");
         return;
+    }
+    if (!active && !allowed) {
+        static bool warned = false;
+        if (!std::exchange(warned, true)) {
+            LOG_WARNING(HW_GPU, "GPU thread split: off, it needs GPU accuracy Low, DMA accuracy not "
+                                "Safe and the Vulkan renderer (much slower Switch 2 draws)");
+        }
     }
     if (active || !allowed) {
         return;

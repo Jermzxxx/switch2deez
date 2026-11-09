@@ -155,6 +155,12 @@ else()
             $<$<COMPILE_LANGUAGE:C,CXX>:-pipe>
             # Disable RTTI (C++ only)
             $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>)
+    elseif (CXX_CLANG_CL)
+        # The cl.exe release flags above, which clang-cl skips
+        add_compile_options(
+            $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX>>:/GS->
+            $<$<COMPILE_LANGUAGE:C,CXX>:/Gy>
+            $<$<COMPILE_LANGUAGE:CXX>:/GR->)
     endif()
 
     if (ENABLE_WERROR)
