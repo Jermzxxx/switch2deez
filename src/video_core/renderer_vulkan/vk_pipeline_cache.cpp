@@ -2703,7 +2703,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
     // make it dirty again. A pool too large to flush on every miss translates here as before.
     if (std::ranges::count_if(graphics_key.unique_hashes, [](u64 hash) { return hash != 0; }) >=
         2) {
-        constexpr u64 MaxFlushedTexturePoolBytes = u64{1} << 20;
+        // Ocarina of Time's pool is 1,058,176 bytes: a 1 MiB limit kept all its pipelines on the
+        // serial path. Flushing costs a cache lookup per page and copies only GPU-written data.
+        constexpr u64 MaxFlushedTexturePoolBytes = u64{8} << 20;
         const auto& tex_header = maxwell3d->regs.tex_header;
         const u64 pool_bytes = (u64{tex_header.limit} + 1) * sizeof(Tegra::Texture::TICEntry);
         if (pool_bytes <= MaxFlushedTexturePoolBytes) {
