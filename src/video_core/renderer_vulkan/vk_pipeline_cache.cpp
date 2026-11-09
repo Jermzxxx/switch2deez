@@ -26,6 +26,7 @@
 #include "common/scope_exit.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
+#include "common/memory_detect.h"
 #include "common/thread.h"
 #include "common/thread_worker.h"
 #include "core/core.h"
@@ -2048,32 +2049,44 @@ void PipelineCache::EvictUnusedPipelines() {
     }
     const u64 cutoff = frame_count - EvictAfterFrames;
     const u64 tick = scheduler.CurrentTick();
-    // ~0.9 GB of driver memory at ~0.45 MB each.
-    constexpr size_t MaxUnusedPrebuiltPipelines = 2000;
-    size_t kept_prebuilt = 0;
+    // Built pipelines are kept up to a quarter of the host's RAM at ~0.45 MB each (2000 at
+    // least, as before): a fixed 2000 for the unused prebuilt ones threw away 5458 of Ocarina's
+    // 8493 boot builds 2.5 minutes in, each rebuilt later with a driver compile of up to 2.8 s.
+    // Over the budget, those unused longest go first, then the prebuilt ones no draw has used.
+    static const size_t budget = [] {
+        constexpr u64 PipelineBytes = 450ULL << 10;
+        const u64 ram = Common::GetMemInfo().TotalPhysicalMemory;
+        return static_cast<size_t>(std::clamp<u64>(ram / 4 / PipelineBytes, 2000, 20000));
+    }();
+    if (graphics_cache.size() <= budget) {
+        return;
+    }
+    struct Candidate {
+        GraphicsPipelineCacheKey key;
+        bool used;
+        u64 last_use;
+    };
+    std::vector<Candidate> candidates;
+    for (const auto& [key, pipeline] : graphics_cache) {
+        if (pipeline && pipeline.get() != current_pipeline && pipeline->IsBuilt() &&
+            pipeline->LastUse() < cutoff) {
+            candidates.push_back({key, pipeline->WasUsed(), pipeline->LastUse()});
+        }
+    }
+    std::ranges::sort(candidates, [](const Candidate& lhs, const Candidate& rhs) {
+        return lhs.used != rhs.used ? lhs.used : lhs.last_use < rhs.last_use;
+    });
     size_t evicted = 0;
-    for (auto it = graphics_cache.begin(); it != graphics_cache.end();) {
-        GraphicsPipeline* const pipeline = it->second.get();
-        if (pipeline == nullptr || pipeline == current_pipeline || !pipeline->IsBuilt() ||
-            pipeline->LastUse() >= cutoff) {
-            ++it;
-            continue;
+    for (const Candidate& candidate : candidates) {
+        if (graphics_cache.size() <= budget) {
+            break;
         }
-        // A pipeline built from the disk cache at boot that no draw has used yet stays, up to a
-        // budget: evicting it throws the prebuild away, and the game translates it again on the
-        // GPU thread when it reaches that content (OoT: 1174 of 1346 evicted on the title screen,
-        // 684 rebuilt in 10 s on entering the field). Past the budget they go like the rest, so a
-        // large cache can't hold their driver memory for the whole session.
-        if (!pipeline->WasUsed() && kept_prebuilt < MaxUnusedPrebuiltPipelines) {
-            ++kept_prebuilt;
-            ++it;
-            continue;
-        }
-        if (used_this_session.erase(pipeline) != 0) {
+        const auto it = graphics_cache.find(candidate.key);
+        if (used_this_session.erase(it->second.get()) != 0) {
             used_and_evicted.insert(it->first.Hash());
         }
         evicted_pipelines.emplace_back(tick, std::move(it->second));
-        it = graphics_cache.erase(it);
+        graphics_cache.erase(it);
         ++evicted;
     }
     if (evicted == 0) {
@@ -2084,8 +2097,8 @@ void PipelineCache::EvictUnusedPipelines() {
             pipeline->ClearTransitions();
         }
     }
-    LOG_INFO(Render_Vulkan, "Evicted {} graphics pipelines unused for {} frames, {} left", evicted,
-             EvictAfterFrames, graphics_cache.size());
+    LOG_INFO(Render_Vulkan, "Evicted {} graphics pipelines unused for {} frames, {} left of {} kept",
+             evicted, EvictAfterFrames, graphics_cache.size(), budget);
 }
 
 /// Returns `pipeline` when it is built or the current draw must wait for it, and nullptr when the
