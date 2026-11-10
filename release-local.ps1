@@ -27,8 +27,8 @@ function Invoke-Build([string]$step) {
     if ($LASTEXITCODE -ne 0) { throw "build-local.cmd $step failed" }
 }
 
-# Test as a dev build (Lichii's tests expect its default update repository), then build the
-# release from the same sources.
+# Test the dev build (build\: Lichii's tests expect its default update repository), then build the
+# release variant (build-release\: ThinLTO and profile-guided optimisation) from the same sources.
 Remove-Item Env:RELEASE_TAG, Env:RELEASE_PLATFORM -ErrorAction SilentlyContinue
 Invoke-Build configure
 Invoke-Build build
@@ -39,23 +39,20 @@ $env:RELEASE_PLATFORM = $platform
 try {
     Invoke-Build configure
     Invoke-Build build
-
-    # Package the deployed bin directory (Qt and the other DLLs included), without the test programs.
-    $stage = Join-Path $repo "build\release-stage\$tag"
-    if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-    New-Item -ItemType Directory -Force $stage | Out-Null
-    Get-ChildItem build\bin | Where-Object { $_.Name -notmatch 'tests?\.exe$|_probe\.exe$' } |
-        Copy-Item -Destination $stage -Recurse
-    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $stage 'plugins\platforms\qoffscreen.dll')
-    $zip = Join-Path $repo "build\release-stage\lichii-$platform.zip"
-    if (Test-Path $zip) { Remove-Item -Force $zip }
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
-    Write-Host "Packaged $zip ($([math]::Round((Get-Item $zip).Length / 1MB)) MB)"
 } finally {
-    # Put the build directory back to a dev build, so later builds don't claim this number.
     Remove-Item Env:RELEASE_TAG, Env:RELEASE_PLATFORM -ErrorAction SilentlyContinue
-    Invoke-Build configure
 }
+
+# Package the deployed bin directory (Qt and the other DLLs included).
+$stage = Join-Path $repo "build-release\stage\$tag"
+if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+New-Item -ItemType Directory -Force $stage | Out-Null
+Get-ChildItem build-release\bin | Where-Object { $_.Name -notmatch 'tests?\.exe$|_probe\.exe$|\.pdb$' } |
+    Copy-Item -Destination $stage -Recurse
+$zip = Join-Path $repo "build-release\stage\lichii-$platform.zip"
+if (Test-Path $zip) { Remove-Item -Force $zip }
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+Write-Host "Packaged $zip ($([math]::Round((Get-Item $zip).Length / 1MB)) MB)"
 
 if ($DryRun) { Write-Host 'Dry run: not published.'; exit 0 }
 

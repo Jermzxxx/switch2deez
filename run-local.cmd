@@ -7,5 +7,6 @@ setlocal
 if /i "%~1"=="trace" (
     set "EDEN_NX2_STUTTER_TRACE=1"
     set "EDEN_NX2_GPU_PROFILE=1"
+    set "EDEN_DKB_FRAME_TRACE=1"
 )
 start "" "%~dp0build\bin\lichii.exe"
