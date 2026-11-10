@@ -512,16 +512,29 @@ const WindowsCpuSets& CpuSets() {
                 .push_back(processor.id);
         }
         // About ten time-critical threads (six guest cores, GPU front and back, Vulkan worker,
-        // timing, fencing) crowd fewer performance processors: an i5-1235U (2 P cores, 4 logical)
+        // timing, fencing) crowd fewer performance cores: an i5-1235U (2 P cores, 4 logical)
         // ran Ocarina of Time at 9.3 FPS with them kept there, 11.5 FPS with the placement off.
-        constexpr size_t MinPerformanceProcessors = 8;
-        const bool few_performance = result.performance.size() < MinPerformanceProcessors;
+        // Physical cores count, not logical processors: on an i5-12450H (4 P cores, 8 logical)
+        // the threads used 3.5-4.2 cores of CPU time, all of it on those four cores and their
+        // hyperthreads; left to Windows they used 4.6-5.5 and Ocarina spent 17% of an hour
+        // under 35 FPS instead of 70%.
+        constexpr size_t MinPerformanceCores = 6;
+        std::vector<u32> cores;
+        for (const Common::LogicalProcessor& processor : result.processors) {
+            if (processor.efficiency_class == best) {
+                cores.push_back(processor.core);
+            }
+        }
+        std::ranges::sort(cores);
+        const size_t performance_cores =
+            static_cast<size_t>(std::ranges::unique(cores).begin() - cores.begin());
+        const bool few_performance = performance_cores < MinPerformanceCores;
         result.hybrid = !result.efficiency.empty() && !few_performance;
         if (!result.efficiency.empty() && few_performance) {
             LOG_INFO(Common,
-                     "Hybrid CPU with {} performance logical processors (fewer than {}): "
-                     "threads are left to Windows",
-                     result.performance.size(), MinPerformanceProcessors);
+                     "Hybrid CPU with {} performance cores (fewer than {}): threads are left to "
+                     "Windows",
+                     performance_cores, MinPerformanceCores);
         }
         if (result.hybrid) {
             LOG_INFO(Common,
