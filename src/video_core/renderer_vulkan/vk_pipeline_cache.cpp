@@ -831,8 +831,49 @@ PipelineCache::~PipelineCache() {
     // After the records the serialization thread queued: its writer drains on destruction
     shader_cache_v2 = nullptr;
     cache_v2.reset();
+    // Thousands of pipelines are kept (see EvictUnusedPipelines), and the driver takes about a
+    // millisecond to destroy each: one after another that outlasted the frontend's ten seconds for
+    // stopping emulation, which then terminated this thread. Their driver objects go on several
+    // threads (the driver only needs each object destroyed by one thread), the rest here.
+    const auto destroy_begin = std::chrono::steady_clock::now();
+    std::vector<GraphicsPipeline::DriverObjects> driver_objects;
+    driver_objects.reserve(graphics_cache.size() + evicted_pipelines.size());
+    for (auto& [key, pipeline] : graphics_cache) {
+        if (pipeline) {
+            driver_objects.push_back(pipeline->TakeDriverObjects());
+        }
+    }
+    for (auto& [tick, pipeline] : evicted_pipelines) {
+        if (pipeline) {
+            driver_objects.push_back(pipeline->TakeDriverObjects());
+        }
+    }
+    const size_t num_pipelines = driver_objects.size();
+    const size_t num_threads =
+        std::clamp<size_t>(std::thread::hardware_concurrency(), 1, 8);
+    {
+        std::atomic<size_t> next{};
+        std::vector<std::jthread> threads;
+        for (size_t i = 0; i + 1 < num_threads && num_pipelines > 256; ++i) {
+            threads.emplace_back([&] {
+                for (size_t index; (index = next.fetch_add(1)) < num_pipelines;) {
+                    driver_objects[index] = {};
+                }
+            });
+        }
+        for (size_t index; (index = next.fetch_add(1)) < num_pipelines;) {
+            driver_objects[index] = {};
+        }
+    }
+    const auto driver_end = std::chrono::steady_clock::now();
     graphics_cache.clear();
     evicted_pipelines.clear();
+    const auto ms = [](auto duration) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    };
+    LOG_INFO(Render_Vulkan, "Destroyed {} graphics pipelines in {} ms ({} ms for the driver's)",
+             num_pipelines, ms(std::chrono::steady_clock::now() - destroy_begin),
+             ms(driver_end - destroy_begin));
     if (pipeline_binaries) {
         pipeline_binaries->LogCounts("at the end of the session");
         pipeline_binaries.reset();

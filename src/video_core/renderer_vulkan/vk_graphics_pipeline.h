@@ -261,6 +261,23 @@ public:
         mapped_pointers = std::move(slots);
     }
 
+    /// The driver's pipelines and shader modules, taken out of a pipeline about to be destroyed
+    /// so the pipeline cache can destroy those of many pipelines on several threads. Only once
+    /// no build of this pipeline can run any more.
+    struct DriverObjects {
+        std::array<vk::Pipeline, 4> pipelines;
+        std::array<vk::ShaderModule, NUM_STAGES + 2> modules;
+    };
+    [[nodiscard]] DriverObjects TakeDriverObjects() noexcept {
+        DriverObjects objects;
+        objects.pipelines = {std::move(pipeline), std::move(mesh_compute_pipeline),
+                             std::move(task_compute_pipeline), std::move(distribution_pipeline)};
+        std::ranges::move(spv_modules, objects.modules.begin());
+        objects.modules[NUM_STAGES] = std::move(mesh_vertex_module);
+        objects.modules[NUM_STAGES + 1] = std::move(distribution_module);
+        return objects;
+    }
+
     /// Forgets the transitions, which may point to pipelines the cache evicted.
     void ClearTransitions() noexcept {
         transition_keys.clear();
