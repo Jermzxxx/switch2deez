@@ -5,7 +5,7 @@ rem   run-local.cmd trace      logs stutters and their causes, frame times and p
 rem                            light, frame rates are close to a normal run
 rem   run-local.cmd profile    as trace, plus the GPU thread profile (time per zone); it takes the
 rem                            emulator off its fast paths, so frame rates are lower than normal
-rem Log: %APPDATA%\eden\log\eden_log.txt
+rem Log: %APPDATA%\lichii\log\eden_log.txt
 setlocal
 if /i "%~1"=="trace" goto trace
 if /i "%~1"=="profile" goto profile

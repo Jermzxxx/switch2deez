@@ -24,7 +24,7 @@ Only use games and system files you have legally obtained. Games, keys and firmw
 
 ### Saves and settings
 
-switch2deez uses the same data folder as Lichii and Eden (`%APPDATA%\eden` on Windows), so your saves, settings and shader caches are shared with them. Back up your saves before trying a new build.
+switch2deez uses Lichii's data folder, `%APPDATA%\lichii` on Windows, so your saves, settings and shader caches are shared with Lichii. Builds before build-4 used `%APPDATA%\eden`: on the first launch of a newer build, Lichii offers to import it. Choose **Import**, then **Keep Old Data**, which copies the old folder and leaves it unchanged. Back up your saves before trying a new build.
 
 ## What is different from Lichii
 
@@ -45,7 +45,7 @@ Everything else, including game compatibility, comes from Lichii. See [Lichii's 
 
 - The build number (from the title bar or the first line of the log), the game and its version, your CPU, GPU and driver version.
 - Your relevant settings and the steps to reproduce the problem.
-- The log from the affected session (`%APPDATA%\eden\log\eden_log.txt`), after checking it for personal information.
+- The log from the affected session (`%APPDATA%\lichii\log\eden_log.txt`), after checking it for personal information.
 
 Do not upload game files, keys, firmware or private account information.
 
