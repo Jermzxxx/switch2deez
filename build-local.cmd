@@ -6,7 +6,9 @@ rem Three variants, each in a build directory of its own:
 rem   dev (default)            build\          with the tests; quick to rebuild
 rem   release (RELEASE_TAG set) build-release\  ThinLTO and profile-guided optimisation, as Lichii's
 rem                             releases; RELEASE_TAG=build-N and RELEASE_PLATFORM=windows-x86_64
-rem                             number it for the built-in updater (release-local.ps1 sets them)
+rem                             number it for the built-in updater (release-local.ps1 sets them).
+rem                             Line-table debug info and lichii.pdb, kept here for reading crash
+rem                             dumps (not shipped)
 rem   pgo (BUILD_VARIANT=pgo)  build-pgo\      instrumented, writes a profile while it runs
 rem                             (pgo-train.cmd drives it)
 
@@ -25,6 +27,7 @@ set "BUILD_DIR=build"
 set "TESTS=ON"
 set "TRANSLATIONS=OFF"
 set "EXTRA_FLAGS="
+set "LINK_ARG="
 rem Release builds update from this fork; the others keep Lichii's default so its tests still match.
 set "UPDATE_REPO="
 if defined RELEASE_TAG goto variant_release
@@ -40,7 +43,9 @@ rem A profile trained here (pgo-train.cmd) when there is one, Lichii's Ocarina o
 set "PROFILE=%ROOT%switch2deez.profdata"
 if not exist "%PROFILE%" set "PROFILE=%ROOT%lichii-windows.profdata"
 set "PROFILE=%PROFILE:\=/%"
-set "EXTRA_FLAGS= -flto=thin -fprofile-use=%PROFILE% -Wno-error=profile-instr-out-of-date -Wno-error=profile-instr-unprofiled -Wno-error=backend-plugin"
+set "EXTRA_FLAGS= -flto=thin -fprofile-use=%PROFILE% -Wno-error=profile-instr-out-of-date -Wno-error=profile-instr-unprofiled -Wno-error=backend-plugin -gline-tables-only"
+rem /DEBUG writes the .pdb; with it lld-link would stop removing and folding unused code unless asked.
+set LINK_ARG="-DCMAKE_EXE_LINKER_FLAGS=/machine:x64 /DEBUG /OPT:REF /OPT:ICF"
 goto variant_done
 
 :variant_pgo
@@ -68,7 +73,7 @@ cmake -S . -B %BUILD_DIR% -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   "-DCMAKE_AR=%LLVM%/bin/llvm-lib.exe" ^
   "-DCMAKE_C_FLAGS=-DWIN32 -D_WINDOWS -DNOMINMAX%EXTRA_FLAGS%" ^
   "-DCMAKE_CXX_FLAGS=-DWIN32 -D_WINDOWS -EHsc -DNOMINMAX%EXTRA_FLAGS%" ^
-  "-DCMAKE_PREFIX_PATH=%QT%" ^
+  "-DCMAKE_PREFIX_PATH=%QT%" %LINK_ARG% ^
   -DYUZU_BUILD_PRESET=v3 ^
   -DENABLE_WERROR=ON -DBUILD_TESTING=%TESTS% -DYUZU_TESTS=%TESTS% -DENABLE_QT=ON -DYUZU_CMD=ON ^
   -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_USE_BUNDLED_QT=OFF ^

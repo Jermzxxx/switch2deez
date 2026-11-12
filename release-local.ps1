@@ -54,6 +54,18 @@ if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
 Write-Host "Packaged $zip ($([math]::Round((Get-Item $zip).Length / 1MB)) MB)"
 
+# Keep the programs and their debug symbols, which the zip leaves out: a crash dump of this
+# release is read against them (llvm-symbolizer --obj=lichii.exe) after build-release changed.
+$symbols = Join-Path $repo "build-release\symbols\$tag"
+if (Test-Path $symbols) { Remove-Item -Recurse -Force $symbols }
+New-Item -ItemType Directory -Force $symbols | Out-Null
+foreach ($name in 'lichii.exe', 'lichii.pdb', 'eden-cli.exe', 'eden-cli.pdb') {
+    $file = Join-Path $repo "build-release\bin\$name"
+    if (Test-Path $file) { Copy-Item $file $symbols }
+}
+if (-not (Test-Path (Join-Path $symbols 'lichii.pdb'))) { throw 'build-release\bin\lichii.pdb is missing.' }
+Write-Host "Symbols kept in $symbols"
+
 if ($DryRun) { Write-Host 'Dry run: not published.'; exit 0 }
 
 git push origin main --quiet
