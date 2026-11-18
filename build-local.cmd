@@ -84,7 +84,9 @@ cmake -S . -B %BUILD_DIR% -G Ninja -DCMAKE_BUILD_TYPE=Release ^
 if "%STEP%"=="configure" exit /b 0
 
 :build
-cmake --build %BUILD_DIR% --parallel || exit /b 1
+rem 16 GB of RAM runs out of commit with one clang per thread on video_core.
+if not defined BUILD_JOBS set BUILD_JOBS=8
+cmake --build %BUILD_DIR% --parallel %BUILD_JOBS% || exit /b 1
 if "%STEP%"=="build" exit /b 0
 if "%TESTS%"=="OFF" exit /b 0
 
